@@ -68,13 +68,24 @@ Folder: `dbt/models/marts/`
 ### Phase 5 · CI and polish
 - [ ] Extend `.github/workflows/ci.yml`: add a Postgres service container, load a small sample CSV, and run `dbt build` on every push.
 - [ ] Finish this README: the architecture diagram, how to run it, the schema image, and a short "What I learned / what I'd do next" section.
+- [ ] Add 2–3 dashboard screenshots and a short dated **Findings** section (e.g. "Oct 2026: price per sqm in X rose Y% year on year"), so a recruiter sees the insights without running anything.
 - [ ] Pin the repo on your GitHub profile and add the link to your CV.
 
 **Done when:** a pull request shows a green CI check, and a stranger could run the project from the README alone.
 
-### Phase 6 · Optional extras
-- Metabase (free) dashboard on the mart
-- Swap Postgres for BigQuery (GCP free tier) to match GCP-based JDs
+### Phase 6 · Public dashboard and extras
+**Public dashboard** (reuses the Phase 5 CI work)
+- [ ] Add a scheduled GitHub Actions workflow (weekly) that loads the data, runs `dbt build`, and exports `mart_monthly_town_prices` to a small Parquet/CSV file committed to the repo.
+- [ ] Build a Streamlit app that reads that file and host it free on Streamlit Community Cloud. It redeploys on every new file, so the public link updates weekly by itself.
+- [ ] Metabase (free) stays as the local dashboard, one more container next to Airflow, reading the mart directly.
+
+**HDB fair-price model** (replaces the old Streamlit HDB forecast project)
+- [ ] Train a pricing model on the star schema using floor area, storey, remaining lease, distance to the nearest MRT, and time.
+- [ ] Backtest it on later months and report error bands, plus which features drive the price.
+- [ ] Add an "is this listing overpriced?" page to the Streamlit app.
+
+**Other options**
+- Swap Postgres for BigQuery (GCP free tier) to match GCP-based JDs, with Looker Studio as a public dashboard alternative
 - Trigger your Databricks project from Airflow
 
 ---
