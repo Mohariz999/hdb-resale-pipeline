@@ -1,0 +1,39 @@
+version: 2
+
+models:
+  - name: stg_resale_transactions
+    description: >
+      One cleaned, typed row per HDB resale transaction. All casting and text tidying
+      happens here, so the marts in Phase 3 read from this and never from raw.
+      (Phase 4 adds the tests for these columns.)
+    columns:
+      - name: transaction_month
+        description: Registration month as a date, the 1st of that month (e.g. 2026-09-01).
+      - name: town
+        description: 'Town in title case, e.g. "Ang Mo Kio".'
+      - name: flat_type
+        description: '"3 ROOM", "4 ROOM", "EXECUTIVE", and so on.'
+      - name: flat_model
+        description: 'Flat model in upper case, e.g. "NEW GENERATION", "DBSS".'
+      - name: street_name
+        description: Street name in title case.
+      - name: block
+        description: 'Block number, letter suffix kept, e.g. "174A".'
+      - name: storey_range
+        description: 'The source band, e.g. "01 TO 03".'
+      - name: storey_min
+        description: Lowest storey in the band, as a number.
+      - name: storey_max
+        description: Highest storey in the band, as a number.
+      - name: floor_area_sqm
+        description: Floor area in square metres.
+      - name: lease_commence_year
+        description: Year the 99-year lease started.
+      - name: remaining_lease_months
+        description: 'Remaining lease in whole months ("61 years 04 months" becomes 736).'
+      - name: resale_price
+        description: Transacted resale price in SGD.
+      - name: price_per_sqm
+        description: resale_price / floor_area_sqm, rounded to 2 dp. Compares flats of different sizes.
+      - name: loaded_at
+        description: When the pipeline loaded the underlying raw row.
