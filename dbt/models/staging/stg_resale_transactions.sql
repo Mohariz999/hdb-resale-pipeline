@@ -19,7 +19,7 @@ cleaned as (
         -- The source shouts ("ANG MO KIO"); initcap makes it readable, trim drops stray spaces
         initcap(trim(town)) as town,
         upper(trim(flat_type)) as flat_type,          -- "4 ROOM": an abbreviation, keep it upper
-        initcap(trim(flat_model)) as flat_model,
+        upper(trim(flat_model)) as flat_model,        -- "DBSS", "3Gen": initcap would mangle these
         initcap(trim(street_name)) as street_name,
         upper(trim(block)) as block,                  -- "174A", the letter stays upper
 

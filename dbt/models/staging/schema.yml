@@ -14,7 +14,7 @@ models:
       - name: flat_type
         description: '"3 ROOM", "4 ROOM", "EXECUTIVE", and so on.'
       - name: flat_model
-        description: 'Flat model in title case, e.g. "New Generation".'
+        description: 'Flat model in upper case, e.g. "NEW GENERATION", "DBSS".'
       - name: street_name
         description: Street name in title case.
       - name: block
