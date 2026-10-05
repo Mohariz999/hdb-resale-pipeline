@@ -79,11 +79,6 @@ Folder: `dbt/models/marts/`
 - [ ] Build a Streamlit app that reads that file and host it free on Streamlit Community Cloud. It redeploys on every new file, so the public link updates weekly by itself.
 - [ ] Metabase (free) stays as the local dashboard, one more container next to Airflow, reading the mart directly.
 
-**HDB fair-price model** (replaces the old Streamlit HDB forecast project)
-- [ ] Train a pricing model on the star schema using floor area, storey, remaining lease, distance to the nearest MRT, and time.
-- [ ] Backtest it on later months and report error bands, plus which features drive the price.
-- [ ] Add an "is this listing overpriced?" page to the Streamlit app.
-
 **Other options**
 - Swap Postgres for BigQuery (GCP free tier) to match GCP-based JDs, with Looker Studio as a public dashboard alternative
 - Trigger your Databricks project from Airflow
