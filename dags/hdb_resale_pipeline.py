@@ -1,19 +1,102 @@
 """HDB resale pipeline: data.gov.sg -> raw Postgres -> dbt (staging -> star schema) -> tests.
 
-YOU write the logic in this file (Phases 1 and 4). The structure is here so the DAG
-shows up in the UI; tasks raise NotImplementedError until you fill them in.
+Phase 1: extract() and load() pull a rolling two-month window and load it idempotently.
 """
 
-from datetime import datetime, timezone
+import csv
+import logging
+import os
+import time
+from datetime import datetime, timedelta, timezone
 
+import requests
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.standard.operators.bash import BashOperator
-from airflow.sdk import dag, task
+from airflow.sdk import dag, get_current_context, task
+
+log = logging.getLogger(__name__)
 
 DATASET_ID = (
     "d_8b84c4ee58e3cfc0ece0d773c8ca6abc"  # Resale flat prices, Jan 2017 onwards
 )
+API_URL = "https://data.gov.sg/api/action/datastore_search"
+PAGE_SIZE = 1000
+MAX_RETRIES = 5
+DATA_DIR = "/opt/airflow/data"
 DBT = "/opt/dbt-venv/bin/dbt"
 DBT_DIR = "/opt/airflow/dbt"
+
+# Source columns, in a fixed order so the CSV and the table always line up.
+COLUMNS = [
+    "month",
+    "town",
+    "flat_type",
+    "block",
+    "street_name",
+    "storey_range",
+    "floor_area_sqm",
+    "flat_model",
+    "lease_commence_date",
+    "remaining_lease",
+    "resale_price",
+]
+
+# Everything is TEXT in raw: load exactly what the source sent, cast types later in dbt.
+CREATE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS raw.resale_transactions (
+    month TEXT,
+    town TEXT,
+    flat_type TEXT,
+    block TEXT,
+    street_name TEXT,
+    storey_range TEXT,
+    floor_area_sqm TEXT,
+    flat_model TEXT,
+    lease_commence_date TEXT,
+    remaining_lease TEXT,
+    resale_price TEXT,
+    loaded_at TIMESTAMP NOT NULL DEFAULT now()
+)
+"""
+
+
+def months_to_refresh(run_date: datetime) -> list[str]:
+    """The run's month and the month before it, as "YYYY-MM"."""
+    first_of_month = run_date.replace(day=1)
+    previous = first_of_month - timedelta(days=1)  # also handles Jan -> Dec
+    return [previous.strftime("%Y-%m"), run_date.strftime("%Y-%m")]
+
+
+def fetch_month(month: str, headers: dict, pause: float) -> list[dict]:
+    """Page through the API for one month and return all its records."""
+    records: list[dict] = []
+    offset = 0
+    while True:
+        params = {
+            "resource_id": DATASET_ID,
+            "filters": f'{{"month": "{month}"}}',
+            "limit": PAGE_SIZE,
+            "offset": offset,
+        }
+        for attempt in range(1, MAX_RETRIES + 1):
+            resp = requests.get(API_URL, params=params, headers=headers, timeout=30)
+            if resp.status_code != 429:
+                break
+            wait = pause * 2**attempt  # rate limited: back off and try again
+            log.warning("429 from data.gov.sg, retry %s in %.0fs", attempt, wait)
+            time.sleep(wait)
+        resp.raise_for_status()  # still 429 after retries, or any other error: fail the task
+
+        body = resp.json()
+        if not body.get("success"):
+            raise RuntimeError(f"data.gov.sg error for {month}: {body}")
+        result = body["result"]
+        records.extend(result["records"])
+
+        offset += PAGE_SIZE
+        if offset >= result["total"]:
+            return records
+        time.sleep(pause)  # stay under the rate limit between pages
 
 
 @dag(
@@ -26,37 +109,71 @@ DBT_DIR = "/opt/airflow/dbt"
 def hdb_resale_pipeline():
     @task
     def extract() -> str:
-        """Phase 1: pull the CURRENT and PREVIOUS month from the data.gov.sg API.
+        """Pull the current and previous month from data.gov.sg into a CSV.
 
-        Why two months: the data is monthly (a `month` column like "2026-10") but
-        data.gov.sg updates it daily, so the current month keeps growing and late
-        registrations can still land in last month. Each weekly run refreshes both.
-
-        Hints:
-          - Get the run's date from the context:
-              from airflow.sdk import get_current_context
-              ctx = get_current_context()
-              run_date = ctx["logical_date"]   # the Sunday this run is for
-            Work out the two months from run_date and log them.
-          - Endpoint: https://data.gov.sg/api/action/datastore_search?resource_id=<DATASET_ID>
-            Try it in your browser first. Look at how to filter by month and how paging works.
-          - API key (optional, free): send header {"x-api-key": os.environ["DATA_GOV_SG_API_KEY"]}
-            Rate limit is ~4 requests / 10 sec without a key: sleep between pages, retry on HTTP 429.
-          - Save rows to /opt/airflow/data/resale_<run_date>.csv and return that path.
+        Why two months: the data is monthly but data.gov.sg updates it daily, so the
+        current month keeps growing and late registrations can still land in last month.
         """
-        raise NotImplementedError("Phase 1: write extract()")
+        ctx = get_current_context()
+        # Manual triggers can have no logical_date in Airflow 3, so fall back to run_after.
+        run_date = ctx.get("logical_date") or ctx["dag_run"].run_after
+        months = months_to_refresh(run_date)
+        log.info("Refreshing months %s (run date %s)", months, run_date)
+
+        api_key = os.environ.get("DATA_GOV_SG_API_KEY")
+        headers = {"x-api-key": api_key} if api_key else {}
+        pause = 1.5 if api_key else 3.0  # ~8 vs ~4 requests per 10 sec
+
+        path = f"{DATA_DIR}/resale_{run_date:%Y%m%dT%H%M%S}.csv"
+        with open(path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=COLUMNS, extrasaction="ignore")
+            writer.writeheader()
+            for month in months:
+                rows = fetch_month(month, headers, pause)
+                writer.writerows(rows)  # extrasaction="ignore" drops the API's _id
+                log.info("%s: %s rows", month, len(rows))
+                time.sleep(pause)
+        return path
 
     @task
     def load(csv_path: str) -> int:
-        """Phase 1: load the CSV into raw.resale_transactions. Must be IDEMPOTENT.
+        """Load the CSV into raw.resale_transactions, idempotently.
 
-        Hints:
-          - PostgresHook(postgres_conn_id="warehouse") gives you a connection.
-          - Rerunning must NOT duplicate rows. Pattern: in ONE transaction, delete the
-            rows for the months in this file, then insert the fresh rows.
-          - Return the number of rows loaded (shows up in the task's XCom).
+        In ONE transaction: delete the rows for the months in this file, then insert the
+        fresh rows. A rerun replaces those months instead of adding duplicates, and if
+        anything fails the whole load rolls back, so the table is never half-updated.
         """
-        raise NotImplementedError("Phase 1: write load()")
+        with open(csv_path, newline="") as f:
+            rows = [tuple(r[c] for c in COLUMNS) for r in csv.DictReader(f)]
+        months = sorted({r[0] for r in rows})
+        if not rows:
+            log.warning("No rows in %s, nothing to load", csv_path)
+            return 0
+
+        conn = PostgresHook(postgres_conn_id="warehouse").get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(CREATE_TABLE_SQL)
+                cur.execute(
+                    "DELETE FROM raw.resale_transactions WHERE month = ANY(%s)",
+                    (months,),
+                )
+                log.info("Deleted %s old rows for %s", cur.rowcount, months)
+                placeholders = ", ".join(["%s"] * len(COLUMNS))
+                cur.executemany(
+                    f"INSERT INTO raw.resale_transactions ({', '.join(COLUMNS)}) "
+                    f"VALUES ({placeholders})",
+                    rows,
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        log.info("Loaded %s rows for %s", len(rows), months)
+        return len(rows)
 
     # Phase 4: once your dbt models + tests exist, this runs them after every load.
     dbt_build = BashOperator(
