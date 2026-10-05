@@ -1,0 +1,26 @@
+version: 2
+
+# Tells dbt where the raw data lives. Your staging models select from it with:
+#   select * from {{ source('raw', 'resale_transactions') }}
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: resale_transactions
+        description: HDB resale transactions loaded as-is from data.gov.sg (Jan 2017 onwards).
+        columns:
+          - name: month
+            description: "Registration month, e.g. 2024-01"
+          - name: town
+          - name: flat_type
+          - name: block
+          - name: street_name
+          - name: storey_range
+          - name: floor_area_sqm
+          - name: flat_model
+          - name: lease_commence_date
+          - name: remaining_lease
+            description: "Text like '61 years 04 months'"
+          - name: resale_price
+          - name: loaded_at
+            description: When the row was loaded by the pipeline.

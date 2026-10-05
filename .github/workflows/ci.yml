@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tools
+        run: pip install "dbt-postgres==1.11.0" ruff
+
+      - name: Lint DAG code
+        run: ruff check dags
+
+      - name: Validate dbt project (no database needed)
+        working-directory: dbt
+        run: dbt parse --profiles-dir .
+
+      # Phase 5: add a Postgres service container here, load a small sample CSV
+      # into raw.resale_transactions, and run `dbt build` so every push runs your tests.

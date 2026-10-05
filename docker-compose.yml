@@ -1,0 +1,70 @@
+# Local dev stack: Airflow (standalone) + two Postgres databases.
+#   airflow-db : Airflow's own metadata database (you never touch this)
+#   warehouse  : YOUR data warehouse (raw tables + dbt models live here)
+#
+# Start:  docker compose up -d --build
+# Stop:   docker compose down          (add -v to also wipe the databases)
+
+services:
+  airflow-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 10
+
+  warehouse:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hdb
+      POSTGRES_PASSWORD: hdb
+      POSTGRES_DB: hdb
+    ports:
+      - "5433:5432" # reach it from your terminal / SQL client on localhost:5433
+    volumes:
+      - warehouse-data:/var/lib/postgresql/data
+      - ./warehouse/init:/docker-entrypoint-initdb.d # runs once, on first start
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "hdb"]
+      interval: 5s
+      retries: 10
+
+  airflow:
+    build: ./airflow
+    command: standalone # api-server + scheduler + dag-processor + triggerer in one container
+    user: "${AIRFLOW_UID:-50000}:0"
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+      warehouse:
+        condition: service_healthy
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      # Local dev only: everyone is admin, no login screen. Never do this on a real server.
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True"
+      # Airflow connection to the warehouse (conn_id = "warehouse"), usable via PostgresHook
+      AIRFLOW_CONN_WAREHOUSE: postgresql://hdb:hdb@warehouse:5432/hdb
+      # Used by dbt's profiles.yml inside the container
+      WAREHOUSE_HOST: warehouse
+      WAREHOUSE_PORT: "5432"
+      DBT_PROFILES_DIR: /opt/airflow/dbt
+      # Optional: put DATA_GOV_SG_API_KEY=... in .env for higher API rate limits
+      DATA_GOV_SG_API_KEY: ${DATA_GOV_SG_API_KEY:-}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./dbt:/opt/airflow/dbt
+      - ./data:/opt/airflow/data
+    ports:
+      - "8080:8080"
+
+volumes:
+  airflow-db-data:
+  warehouse-data:

@@ -1,0 +1,16 @@
+# Same profile works in two places:
+#   - inside the Airflow container  -> WAREHOUSE_HOST=warehouse, WAREHOUSE_PORT=5432 (set in docker-compose)
+#   - from the Codespace terminal   -> defaults below: localhost:5433
+# Run dbt from the dbt/ folder with:  dbt build --profiles-dir .
+hdb_resale:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('WAREHOUSE_HOST', 'localhost') }}"
+      port: "{{ env_var('WAREHOUSE_PORT', '5433') | as_number }}"
+      user: hdb
+      password: hdb
+      dbname: hdb
+      schema: analytics
+      threads: 4
