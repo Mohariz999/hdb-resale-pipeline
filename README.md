@@ -12,6 +12,55 @@ data.gov.sg API ──► Airflow DAG (weekly)
 **Stack:** Apache Airflow 3 · dbt Core · PostgreSQL 16 · Docker Compose · GitHub Actions
 **Data:** [Resale flat prices based on registration date, Jan 2017 onwards](https://data.gov.sg/datasets/d_8b84c4ee58e3cfc0ece0d773c8ca6abc/view) (data.gov.sg)
 
+
+## Data model
+
+A star schema: one fact table of sales in the middle, four dimensions around it, and a mart on top for dashboards.
+
+```mermaid
+erDiagram
+    dim_date        ||--o{ fct_resale_transactions : date_key
+    dim_town        ||--o{ fct_resale_transactions : town_key
+    dim_flat_type   ||--o{ fct_resale_transactions : flat_type_key
+    dim_flat_model  ||--o{ fct_resale_transactions : flat_model_key
+
+    fct_resale_transactions {
+        int date_key FK
+        text town_key FK
+        text flat_type_key FK
+        text flat_model_key FK
+        text block
+        text street_name
+        text storey_range
+        numeric resale_price
+        numeric floor_area_sqm
+        numeric price_per_sqm
+        int remaining_lease_months
+    }
+    dim_date {
+        int date_key PK
+        date month_start
+        int year
+        int quarter
+        text month_name
+    }
+    dim_town {
+        text town_key PK
+        text town
+    }
+    dim_flat_type {
+        text flat_type_key PK
+        text flat_type
+        int room_count
+    }
+    dim_flat_model {
+        text flat_model_key PK
+        text flat_model
+    }
+```
+
+`mart_monthly_town_prices` aggregates the fact to one row per month, town and flat type: number of sales, median and average price per sqm, and median price.
+
 ---
 
 ## Build plan
