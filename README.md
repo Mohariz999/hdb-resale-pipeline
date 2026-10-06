@@ -15,6 +15,29 @@ An end-to-end batch data pipeline on Singapore public data. Airflow pulls HDB re
 - **31 data tests on every run.** Unique and not-null keys, accepted values, fact-to-dimension relationships and a custom price check. A bad row fails the run instead of reaching a dashboard.
 - **CI on every push.** GitHub Actions starts a Postgres container, loads a sample, and runs the full `dbt build` with tests.
 
+## Findings
+
+*Data as of 6 Oct 2026. Prices are average resale price per square metre, from `mart_monthly_town_prices`.*
+
+**Resale prices rose about 52% from 2017 to 2025, and nearly all of that came after 2020.**
+
+| Year | Sales | Avg price per sqm (SGD) |
+|---|---:|---:|
+| 2017 | 20,509 | 4,579 |
+| 2019 | 22,186 | 4,477 |
+| 2020 | 23,333 | 4,670 |
+| 2021 | 29,087 | 5,249 |
+| 2023 | 25,754 | 6,071 |
+| 2025 | 25,085 | 6,954 |
+| 2026 (to Oct) | 19,965 | 7,005 |
+
+- **Flat, then a surge.** Prices were flat from 2017 to 2019 (down 2%), then rose 12% in 2021 alone, when sales also hit their peak of 29,087.
+- **Growth is slowing.** 2026 so far is only about 1% above 2025, after 7% growth in 2025.
+- **Outer towns caught up.** For 4-room flats, the biggest rises from 2017 to 2025 were in non-central towns: Sembawang (+80%), Pasir Ris and Hougang (+65%), and Woodlands (+64%). Mature central towns rose least: Marine Parade (+27%), Bukit Timah (+29%) and Bishan (+34%).
+- **The gap narrowed.** In 2017, a 4-room flat in the Central Area cost 2.4× as much per sqm as one in Choa Chu Kang, the cheapest town. By 2025 that was 2.1×. Queenstown and the Central Area now pass $10,000 per sqm.
+
+*Caveat: these are simple averages, not adjusted for flat age or remaining lease, so part of the change reflects which flats were sold each year.*
+
 ## Architecture
 
 ```mermaid
