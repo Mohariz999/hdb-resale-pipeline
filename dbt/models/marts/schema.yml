@@ -1,0 +1,94 @@
+version: 2
+
+# The star schema: fct_resale_transactions in the middle, four dimensions around it,
+# and one mart built on top for dashboards. (Phase 4 adds the tests for these columns.)
+
+models:
+  - name: dim_town
+    description: One row per HDB town.
+    columns:
+      - name: town_key
+        description: Surrogate key, md5 of the town name.
+      - name: town
+        description: 'Town in title case, e.g. "Ang Mo Kio".'
+
+  - name: dim_flat_type
+    description: One row per flat type.
+    columns:
+      - name: flat_type_key
+        description: Surrogate key, md5 of the flat type.
+      - name: flat_type
+        description: '"3 ROOM", "4 ROOM", "EXECUTIVE", and so on.'
+      - name: room_count
+        description: Number of rooms for "N ROOM" types; null for EXECUTIVE and MULTI-GENERATION.
+
+  - name: dim_flat_model
+    description: One row per flat model.
+    columns:
+      - name: flat_model_key
+        description: Surrogate key, md5 of the flat model.
+      - name: flat_model
+        description: 'Flat model in upper case, e.g. "NEW GENERATION", "DBSS".'
+
+  - name: dim_date
+    description: One row per month, with no gaps between the first and last sale.
+    columns:
+      - name: date_key
+        description: Month as an integer, e.g. 202609.
+      - name: month_start
+        description: First day of the month.
+      - name: year
+      - name: quarter
+      - name: month_number
+      - name: month_name
+        description: 'e.g. "September".'
+      - name: year_month
+        description: 'e.g. "2026-09".'
+
+  - name: fct_resale_transactions
+    description: >
+      One row per resale transaction. Keys point to the four dimensions; the measures are
+      price, floor area, price per sqm and remaining lease. Block, street and storey describe
+      only this sale, so they stay here as degenerate dimensions.
+    columns:
+      - name: date_key
+        description: Points to dim_date.
+      - name: town_key
+        description: Points to dim_town.
+      - name: flat_type_key
+        description: Points to dim_flat_type.
+      - name: flat_model_key
+        description: Points to dim_flat_model.
+      - name: resale_price
+        description: Transacted resale price in SGD.
+      - name: floor_area_sqm
+        description: Floor area in square metres.
+      - name: price_per_sqm
+        description: resale_price / floor_area_sqm.
+      - name: remaining_lease_months
+        description: Remaining lease in whole months at the time of sale.
+
+  - name: mart_monthly_town_prices
+    description: >
+      Median and average price per sqm and number of sales, by month, town and flat type.
+      To roll months up to a year, use sum(sum_price_per_sqm) / sum(transactions), e.g.
+      the average 4-room price per sqm in Tampines in 2025:
+        select round(sum(sum_price_per_sqm) / sum(transactions), 2)
+        from marts.mart_monthly_town_prices
+        where town = 'Tampines' and flat_type = '4 ROOM' and year = 2025;
+    columns:
+      - name: month_start
+      - name: year
+      - name: year_month
+      - name: town
+      - name: flat_type
+      - name: transactions
+        description: Number of resale transactions.
+      - name: median_price_per_sqm
+        description: The typical sale's price per sqm; robust to a few very expensive flats.
+      - name: median_resale_price
+        description: The typical sale's resale price in SGD.
+      - name: sum_price_per_sqm
+        description: Sum of price per sqm, so months can be rolled up into a correct yearly average.
+      - name: avg_price_per_sqm
+        description: Average price per sqm for the month.
