@@ -1,6 +1,7 @@
 """HDB resale pipeline: data.gov.sg -> raw Postgres -> dbt (staging -> star schema) -> tests.
 
-Phase 1: extract() and load() pull a rolling two-month window and load it idempotently.
+Weekly runs refresh a rolling two-month window. A manual run with start_month (and
+optionally end_month) set backfills any range instead, e.g. all history from 2017-01.
 """
 
 import csv
@@ -12,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.standard.operators.bash import BashOperator
-from airflow.sdk import dag, get_current_context, task
+from airflow.sdk import Param, dag, get_current_context, task
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +68,18 @@ def months_to_refresh(run_date: datetime) -> list[str]:
     return [previous.strftime("%Y-%m"), run_date.strftime("%Y-%m")]
 
 
+def months_between(start: str, end: str) -> list[str]:
+    """Every month from start to end inclusive, as "YYYY-MM"."""
+    year, month = map(int, start.split("-"))
+    months = []
+    while f"{year:04d}-{month:02d}" <= end:
+        months.append(f"{year:04d}-{month:02d}")
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    if not months:
+        raise ValueError(f"start_month {start} is after end_month {end}")
+    return months
+
+
 def fetch_month(month: str, headers: dict, pause: float) -> list[dict]:
     """Page through the API for one month and return all its records."""
     records: list[dict] = []
@@ -105,20 +118,41 @@ def fetch_month(month: str, headers: dict, pause: float) -> list[dict]:
     catchup=False,
     is_paused_upon_creation=True,
     tags=["hdb"],
+    # Every task retries twice, 5 minutes apart, before the run is marked failed. That rides
+    # out a brief API or network blip without anyone having to rerun it by hand.
+    default_args={"retries": 2, "retry_delay": timedelta(minutes=5)},
+    # Leave both empty for the normal rolling window. To backfill, use "Trigger DAG"
+    # with config, e.g. {"start_month": "2017-01"}; end_month defaults to the run's month.
+    # type ["null", "string"] makes them optional: the trigger form sends an empty field
+    # as null, which a plain "string" param would reject as missing.
+    params={
+        "start_month": Param(
+            None, type=["null", "string"], pattern=r"^(\d{4}-\d{2})?$"
+        ),
+        "end_month": Param(None, type=["null", "string"], pattern=r"^(\d{4}-\d{2})?$"),
+    },
 )
 def hdb_resale_pipeline():
     @task
     def extract() -> str:
-        """Pull the current and previous month from data.gov.sg into a CSV.
+        """Pull the months to refresh from data.gov.sg into a CSV.
 
-        Why two months: the data is monthly but data.gov.sg updates it daily, so the
-        current month keeps growing and late registrations can still land in last month.
+        Normally the current and previous month: the data is monthly but data.gov.sg
+        updates it daily, so the current month keeps growing and late registrations can
+        still land in last month. With start_month set, every month in the range instead.
         """
         ctx = get_current_context()
         # Manual triggers can have no logical_date in Airflow 3, so fall back to run_after.
         run_date = ctx.get("logical_date") or ctx["dag_run"].run_after
-        months = months_to_refresh(run_date)
-        log.info("Refreshing months %s (run date %s)", months, run_date)
+        start, end = ctx["params"]["start_month"], ctx["params"]["end_month"]
+        if start:
+            months = months_between(start, end or run_date.strftime("%Y-%m"))
+            log.info(
+                "Backfilling %s months, %s to %s", len(months), months[0], months[-1]
+            )
+        else:
+            months = months_to_refresh(run_date)
+            log.info("Refreshing months %s (run date %s)", months, run_date)
 
         api_key = os.environ.get("DATA_GOV_SG_API_KEY")
         headers = {"x-api-key": api_key} if api_key else {}
@@ -175,7 +209,7 @@ def hdb_resale_pipeline():
         log.info("Loaded %s rows for %s", len(rows), months)
         return len(rows)
 
-    # Phase 4: once your dbt models + tests exist, this runs them after every load.
+    # Builds every model and runs every test. A failed test fails this task, and the run.
     dbt_build = BashOperator(
         task_id="dbt_build",
         bash_command=f"cd {DBT_DIR} && {DBT} build",

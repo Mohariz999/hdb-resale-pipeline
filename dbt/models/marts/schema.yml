@@ -1,7 +1,10 @@
 version: 2
 
 # The star schema: fct_resale_transactions in the middle, four dimensions around it,
-# and one mart built on top for dashboards. (Phase 4 adds the tests for these columns.)
+# and one mart built on top for dashboards.
+#
+# Tests: every dimension key is unique and never null, and every key on the fact points
+# at a real dimension row (relationships), so a join can never silently drop sales.
 
 models:
   - name: dim_town
@@ -9,16 +12,28 @@ models:
     columns:
       - name: town_key
         description: Surrogate key, md5 of the town name.
+        data_tests:
+          - unique
+          - not_null
       - name: town
         description: 'Town in title case, e.g. "Ang Mo Kio".'
+        data_tests:
+          - unique
+          - not_null
 
   - name: dim_flat_type
     description: One row per flat type.
     columns:
       - name: flat_type_key
         description: Surrogate key, md5 of the flat type.
+        data_tests:
+          - unique
+          - not_null
       - name: flat_type
         description: '"3 ROOM", "4 ROOM", "EXECUTIVE", and so on.'
+        data_tests:
+          - unique
+          - not_null
       - name: room_count
         description: Number of rooms for "N ROOM" types; null for EXECUTIVE and MULTI-GENERATION.
 
@@ -27,14 +42,23 @@ models:
     columns:
       - name: flat_model_key
         description: Surrogate key, md5 of the flat model.
+        data_tests:
+          - unique
+          - not_null
       - name: flat_model
         description: 'Flat model in upper case, e.g. "NEW GENERATION", "DBSS".'
+        data_tests:
+          - unique
+          - not_null
 
   - name: dim_date
     description: One row per month, with no gaps between the first and last sale.
     columns:
       - name: date_key
         description: Month as an integer, e.g. 202609.
+        data_tests:
+          - unique
+          - not_null
       - name: month_start
         description: First day of the month.
       - name: year
@@ -53,12 +77,36 @@ models:
     columns:
       - name: date_key
         description: Points to dim_date.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
       - name: town_key
         description: Points to dim_town.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_town')
+                field: town_key
       - name: flat_type_key
         description: Points to dim_flat_type.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_flat_type')
+                field: flat_type_key
       - name: flat_model_key
         description: Points to dim_flat_model.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_flat_model')
+                field: flat_model_key
       - name: resale_price
         description: Transacted resale price in SGD.
       - name: floor_area_sqm
@@ -84,6 +132,8 @@ models:
       - name: flat_type
       - name: transactions
         description: Number of resale transactions.
+        data_tests:
+          - not_null
       - name: median_price_per_sqm
         description: The typical sale's price per sqm; robust to a few very expensive flats.
       - name: median_resale_price

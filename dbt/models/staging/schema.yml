@@ -5,16 +5,29 @@ models:
     description: >
       One cleaned, typed row per HDB resale transaction. All casting and text tidying
       happens here, so the marts in Phase 3 read from this and never from raw.
-      (Phase 4 adds the tests for these columns.)
+      The tests below run on every `dbt build`; a failure stops the models built on top.
     columns:
       - name: transaction_month
         description: Registration month as a date, the 1st of that month (e.g. 2026-09-01).
+        data_tests:
+          - not_null
       - name: town
         description: 'Town in title case, e.g. "Ang Mo Kio".'
+        data_tests:
+          - not_null
       - name: flat_type
         description: '"3 ROOM", "4 ROOM", "EXECUTIVE", and so on.'
+        data_tests:
+          - not_null
+          # HDB's seven flat types. A new or misspelt value fails the build, so it gets
+          # noticed instead of quietly becoming its own group in every chart.
+          - accepted_values:
+              arguments:
+                values: ['1 ROOM', '2 ROOM', '3 ROOM', '4 ROOM', '5 ROOM', 'EXECUTIVE', 'MULTI-GENERATION']
       - name: flat_model
         description: 'Flat model in upper case, e.g. "NEW GENERATION", "DBSS".'
+        data_tests:
+          - not_null
       - name: street_name
         description: Street name in title case.
       - name: block
@@ -27,12 +40,16 @@ models:
         description: Highest storey in the band, as a number.
       - name: floor_area_sqm
         description: Floor area in square metres.
+        data_tests:
+          - not_null
       - name: lease_commence_year
         description: Year the 99-year lease started.
       - name: remaining_lease_months
         description: 'Remaining lease in whole months ("61 years 04 months" becomes 736).'
       - name: resale_price
         description: Transacted resale price in SGD.
+        data_tests:
+          - not_null
       - name: price_per_sqm
         description: resale_price / floor_area_sqm, rounded to 2 dp. Compares flats of different sizes.
       - name: loaded_at
