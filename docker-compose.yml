@@ -1,6 +1,6 @@
 # Local dev stack: Airflow (standalone) + two Postgres databases.
 #   airflow-db : Airflow's own metadata database (you never touch this)
-#   warehouse  : YOUR data warehouse (raw tables + dbt models live here)
+#   warehouse  : the data warehouse (raw tables + dbt models live here)
 #
 # Start:  docker compose up -d --build
 # Stop:   docker compose down          (add -v to also wipe the databases)

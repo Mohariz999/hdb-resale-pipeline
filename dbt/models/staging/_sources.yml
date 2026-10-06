@@ -1,6 +1,6 @@
 version: 2
 
-# Tells dbt where the raw data lives. Your staging models select from it with:
+# Tells dbt where the raw data lives. Staging models select from it with:
 #   select * from {{ source('raw', 'resale_transactions') }}
 sources:
   - name: raw
