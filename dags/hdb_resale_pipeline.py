@@ -123,9 +123,13 @@ def fetch_month(month: str, headers: dict, pause: float) -> list[dict]:
     default_args={"retries": 2, "retry_delay": timedelta(minutes=5)},
     # Leave both empty for the normal rolling window. To backfill, use "Trigger DAG"
     # with config, e.g. {"start_month": "2017-01"}; end_month defaults to the run's month.
+    # type ["null", "string"] makes them optional: the trigger form sends an empty field
+    # as null, which a plain "string" param would reject as missing.
     params={
-        "start_month": Param("", type="string", pattern=r"^(\d{4}-\d{2})?$"),
-        "end_month": Param("", type="string", pattern=r"^(\d{4}-\d{2})?$"),
+        "start_month": Param(
+            None, type=["null", "string"], pattern=r"^(\d{4}-\d{2})?$"
+        ),
+        "end_month": Param(None, type=["null", "string"], pattern=r"^(\d{4}-\d{2})?$"),
     },
 )
 def hdb_resale_pipeline():
