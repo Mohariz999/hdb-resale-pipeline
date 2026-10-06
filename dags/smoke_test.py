@@ -1,4 +1,4 @@
-"""Phase 0 smoke test: proves Airflow can reach the warehouse and dbt is installed.
+"""Smoke test: proves Airflow can reach the warehouse and dbt is installed.
 
 Trigger it once from the UI. Both tasks green = your environment works.
 """

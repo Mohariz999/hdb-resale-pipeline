@@ -4,7 +4,7 @@ models:
   - name: stg_resale_transactions
     description: >
       One cleaned, typed row per HDB resale transaction. All casting and text tidying
-      happens here, so the marts in Phase 3 read from this and never from raw.
+      happens here, so the marts read from this and never from raw.
       The tests below run on every `dbt build`; a failure stops the models built on top.
     columns:
       - name: transaction_month

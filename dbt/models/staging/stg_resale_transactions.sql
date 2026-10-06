@@ -2,7 +2,7 @@
 --
 -- raw.resale_transactions is TEXT-only, exactly as data.gov.sg sent it. Everything that
 -- turns that text into usable data happens here, in one place, so every model downstream
--- (the Phase 3 star schema) reads clean data and never touches raw.
+-- (the star schema in marts/) reads clean data and never touches raw.
 
 with source as (
 

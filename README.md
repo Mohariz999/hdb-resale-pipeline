@@ -1,17 +1,40 @@
 # HDB Resale Analytics Pipeline
 
-An end-to-end data pipeline on Singapore public data: Airflow pulls HDB resale transactions from data.gov.sg every week, loads them into PostgreSQL, and dbt models them into a tested star schema. Everything runs in Docker.
+[![CI](https://github.com/Mohariz999/hdb-resale-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/Mohariz999/hdb-resale-pipeline/actions/workflows/ci.yml)
 
+An end-to-end batch data pipeline on Singapore public data. Airflow pulls HDB resale flat transactions from data.gov.sg every week and loads them into PostgreSQL, and dbt models them into a tested star schema with a monthly price mart on top. Everything runs in Docker, and every push builds and tests the models in GitHub Actions.
+
+**Stack:** Apache Airflow 3 · dbt Core · PostgreSQL 16 · Python · Docker Compose · GitHub Actions
+**Data:** [Resale flat prices based on registration date, Jan 2017 onwards](https://data.gov.sg/datasets/d_8b84c4ee58e3cfc0ece0d773c8ca6abc/view) (data.gov.sg), about 220,000 transactions
+
+## Highlights
+
+- **Incremental and idempotent loads.** Each weekly run reloads the current and previous month with delete-then-insert in one transaction, so reruns never duplicate rows and late registrations are picked up.
+- **One-off backfill.** The same DAG takes a `start_month` / `end_month` range to load all history since 2017.
+- **Star schema in dbt.** A fact table of sales, four dimensions and a monthly mart, so "4-room price per sqm in Tampines last year" is one simple query.
+- **31 data tests on every run.** Unique and not-null keys, accepted values, fact-to-dimension relationships and a custom price check. A bad row fails the run instead of reaching a dashboard.
+- **CI on every push.** GitHub Actions starts a Postgres container, loads a sample, and runs the full `dbt build` with tests.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    api[data.gov.sg API] -->|"extract (Python, paged, rate-limit aware)"| csv[CSV file]
+    csv -->|"load (delete + insert per month)"| raw[(raw.resale_transactions)]
+    raw -->|dbt| stg[staging view]
+    stg -->|dbt| star[star schema]
+    star -->|dbt| mart[mart_monthly_town_prices]
+    subgraph dag["Airflow DAG (weekly)"]
+        api
+        csv
+        raw
+        stg
+        star
+        mart
+    end
 ```
-data.gov.sg API ──► Airflow DAG (weekly)
-                      1. extract  → current + previous month (Python)
-                      2. load     → raw.resale_transactions (PostgreSQL, idempotent)
-                      3. dbt build → staging → star schema → marts, plus data tests
-```
 
-**Stack:** Apache Airflow 3 · dbt Core · PostgreSQL 16 · Docker Compose · GitHub Actions
-**Data:** [Resale flat prices based on registration date, Jan 2017 onwards](https://data.gov.sg/datasets/d_8b84c4ee58e3cfc0ece0d773c8ca6abc/view) (data.gov.sg)
-
+The DAG has three tasks: `extract` → `load` → `dbt_build`. Each retries twice before the run fails, and `dbt_build` fails the run if any data test fails.
 
 ## Data model
 
@@ -61,80 +84,63 @@ erDiagram
 
 `mart_monthly_town_prices` aggregates the fact to one row per month, town and flat type: number of sales, median and average price per sqm, and median price.
 
----
+## Data quality
 
-## Build plan
+Tests run as part of every `dbt build`. A failing test stops the models that depend on it.
 
-Work through the phases in order. Each one ends with a clear "done when" check. Commit after every phase.
+| Layer | Tests |
+|---|---|
+| Staging | `not_null` on month, town, flat type, model, floor area and price. `accepted_values` on flat type (HDB's seven types). |
+| Dimensions | `unique` and `not_null` on every key and name. |
+| Fact | `not_null` and `relationships` from each key to its dimension, so no sale is lost in a join. |
+| Custom | `assert_positive_price_and_area`: no sale with a zero or negative price or floor area. |
 
-### Phase 0 · Get it running (about 30 min)
-- [ ] Open this repo in a Codespace: **Code → Codespaces → Create codespace on main**. Wait for setup to finish (a few minutes the first time).
-- [ ] In the terminal: `docker compose up -d --build` (first build takes 3–5 min).
-- [ ] Open the **Ports** tab → port **8080** → Airflow UI. No login needed (local dev mode).
-- [ ] Unpause and trigger the **smoke_test** DAG.
-- [ ] When you're finished for the day: Codespaces menu → **Stop Codespace** (saves your free hours).
+## Design decisions
 
-**Done when:** both `smoke_test` tasks are green, and the `check_warehouse` log lists a `raw` schema.
+- **Raw is all text.** The load stores exactly what the API sent, and all casting happens in one dbt staging model. A bad value never fails the load, and the cleaning logic lives in one place.
+- **A rolling two-month window.** data.gov.sg updates monthly data daily, and late registrations can land in the previous month. Reloading both months keeps them complete without reloading history.
+- **Hashed surrogate keys.** Dimension keys are `md5` of the natural key, so the fact and the dimensions compute matching keys independently, and keys stay stable across rebuilds.
+- **Median as the headline metric.** A few very expensive flats skew averages, so the mart reports median price per sqm. It also stores a sum next to each average, so months roll up into a true yearly average.
 
-### Phase 1 · Extract and load (you write this)
-File: `dags/hdb_resale_pipeline.py`
-- [ ] Open the API URL in your browser and study the JSON: fields, how to filter by month, how paging works.
-- [ ] Create `raw.resale_transactions` (all columns `TEXT` + `loaded_at TIMESTAMP`).
-- [ ] Write `extract()`: work out the current and previous month from the run date, call the API, page through all results, save a CSV.
-- [ ] Write `load()`: insert the CSV into the raw table, **idempotently** (delete those months' rows, then insert, in one transaction).
-- [ ] Trigger the DAG and check: `select month, count(*) from raw.resale_transactions group by 1;`
-- [ ] Trigger it **again**. The counts must not go up (only change if new data arrived).
+## Run it yourself
 
-**Done when:** two months are loaded, and rerunning doesn't duplicate rows.
-**Interview line:** "The source is monthly but updated daily, so my weekly DAG reloads a rolling two-month window idempotently. Late records get picked up, and reruns never duplicate."
+The easiest way is GitHub Codespaces, which has Docker ready to go.
 
-### Phase 2 · dbt staging (you write this)
-Folder: `dbt/models/staging/`
-- [ ] `stg_resale_transactions.sql`: select from `{{ source('raw', 'resale_transactions') }}`, cast types (dates, numbers), clean text, add `price_per_sqm`, convert `remaining_lease` ("61 years 04 months") into months.
-- [ ] Run from the terminal: `cd dbt && dbt build`
+1. **Code → Codespaces → Create codespace on main**, then wait for setup to finish.
+2. Start the stack: `docker compose up -d --build` (the first build takes a few minutes).
+3. Open the **Ports** tab → port **8080** for the Airflow UI. There's no login in local dev mode.
+4. Load history: unpause `hdb_resale_pipeline`, then trigger it with `start_month` = `2017-01`. This takes about 20–25 minutes.
+5. Query the results: `docker compose exec warehouse psql -U hdb -d hdb`, then for example
+   ```sql
+   select year_month, town, flat_type, transactions, median_price_per_sqm
+   from marts.mart_monthly_town_prices
+   where town = 'Tampines' and flat_type = '4 ROOM'
+   order by year_month desc
+   limit 12;
+   ```
 
-**Done when:** `select * from staging.stg_resale_transactions limit 10;` shows clean, typed data.
+After that, the weekly schedule keeps the latest two months up to date. An optional data.gov.sg API key in `.env` (`DATA_GOV_SG_API_KEY=...`) raises the rate limit and roughly halves the backfill time.
 
-### Phase 3 · Star schema and mart (you write this)
-Folder: `dbt/models/marts/`
-- [ ] Dimensions: `dim_town`, `dim_flat_type`, `dim_flat_model`, `dim_date` (one row per month)
-- [ ] Fact: `fct_resale_transactions` (one row per transaction, foreign keys to each dimension, plus measures: price, floor area, price per sqm, remaining lease)
-- [ ] Mart: `mart_monthly_town_prices` (median price per sqm and transaction count, by town and month). This is your reusable business metric.
-- [ ] Draw the schema (fact in the middle, dimensions around it) and add the image to this README.
+## Project structure
 
-**Done when:** you can answer "average 4-room price per sqm in Tampines last year" with one simple query on the mart.
-**Interview line:** be ready to explain why each column belongs in the fact table or a dimension.
+```
+dags/hdb_resale_pipeline.py   Airflow DAG: extract, load, dbt build
+dbt/models/staging/           Typed, cleaned view over the raw table
+dbt/models/marts/             Star schema (fact + 4 dimensions) and the monthly mart
+dbt/tests/                    Custom data tests
+ci/                           Sample data and setup for the CI database
+airflow/Dockerfile            Airflow image with dbt in its own virtualenv
+docker-compose.yml            Airflow, its metadata DB, and the warehouse
+```
 
-### Phase 4 · Tests and full orchestration
-- [ ] Add a `schema.yml` per folder with tests: `unique` + `not_null` on keys, `accepted_values` on flat types, `relationships` from fact to dimensions.
-- [ ] Add one custom test in `dbt/tests/` (e.g. no `resale_price <= 0`).
-- [ ] The DAG already runs `dbt build` after `load`. Add `retries` to your tasks.
-- [ ] Load history: write a one-off backfill (e.g. a `months` parameter on the DAG, or a separate script) for Jan 2017 onwards. Check the counts per month.
-- [ ] Break something on purpose (e.g. insert a bad row) and watch the test catch it.
+## What's next
 
-**Done when:** a full DAG run loads, builds, and tests green, and a bad row makes it fail.
-
-### Phase 5 · CI and polish
-- [ ] Extend `.github/workflows/ci.yml`: add a Postgres service container, load a small sample CSV, and run `dbt build` on every push.
-- [ ] Finish this README: the architecture diagram, how to run it, the schema image, and a short "What I learned / what I'd do next" section.
-- [ ] Add 2–3 dashboard screenshots and a short dated **Findings** section (e.g. "Oct 2026: price per sqm in X rose Y% year on year"), so a recruiter sees the insights without running anything.
-- [ ] Pin the repo on your GitHub profile and add the link to your CV.
-
-**Done when:** a pull request shows a green CI check, and a stranger could run the project from the README alone.
-
-### Phase 6 · Public dashboard and extras
-**Public dashboard** (reuses the Phase 5 CI work)
-- [ ] Add a scheduled GitHub Actions workflow (weekly) that loads the data, runs `dbt build`, and exports `mart_monthly_town_prices` to a small Parquet/CSV file committed to the repo.
-- [ ] Build a Streamlit app that reads that file and host it free on Streamlit Community Cloud. It redeploys on every new file, so the public link updates weekly by itself.
-- [ ] Metabase (free) stays as the local dashboard, one more container next to Airflow, reading the mart directly.
-
-**Other options**
-- Swap Postgres for BigQuery (GCP free tier) to match GCP-based JDs, with Looker Studio as a public dashboard alternative
-- Trigger your Databricks project from Airflow
-
----
+- **Public dashboard.** A scheduled GitHub Actions workflow exports the mart to a small file, and a Streamlit app on Streamlit Community Cloud reads it, so the public link updates weekly by itself.
+- **Local BI.** Metabase as one more container next to Airflow, reading the mart directly.
+- **Cloud warehouse.** Swap Postgres for BigQuery. Only the dbt profile and a few SQL functions would change.
 
 ## Useful commands
+
 | What | Command |
 |---|---|
 | Start everything | `docker compose up -d --build` |

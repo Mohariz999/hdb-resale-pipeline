@@ -7,6 +7,22 @@ on:
 jobs:
   checks:
     runs-on: ubuntu-latest
+
+    # A throwaway Postgres for this job only, so every push builds and tests the real models.
+    services:
+      warehouse:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hdb
+          POSTGRES_PASSWORD: hdb
+          POSTGRES_DB: hdb
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U hdb"
+          --health-interval 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -20,9 +36,14 @@ jobs:
       - name: Lint DAG code
         run: ruff check dags
 
-      - name: Validate dbt project (no database needed)
-        working-directory: dbt
-        run: dbt parse --profiles-dir .
+      - name: Check DAG formatting
+        run: ruff format --check dags
 
-      # Phase 5: add a Postgres service container here, load a small sample CSV
-      # into raw.resale_transactions, and run `dbt build` so every push runs your tests.
+      - name: Load sample data into raw
+        env:
+          PGPASSWORD: hdb
+        run: psql -h localhost -p 5433 -U hdb -d hdb -v ON_ERROR_STOP=1 -f ci/create_raw.sql
+
+      - name: Build and test the dbt models
+        working-directory: dbt
+        run: dbt build --profiles-dir .
