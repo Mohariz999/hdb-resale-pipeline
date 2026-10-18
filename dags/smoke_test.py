@@ -3,7 +3,7 @@
 Trigger it once from the UI. Both tasks green = your environment works.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.standard.operators.bash import BashOperator
@@ -12,7 +12,7 @@ from airflow.sdk import dag, task
 
 @dag(
     schedule=None,
-    start_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+    start_date=datetime(2024, 1, 1, tzinfo=UTC),
     catchup=False,
     tags=["phase-0"],
 )
