@@ -1,7 +1,10 @@
 name: CI
 
+# Pushes to main, plus every PR. (Running on every branch push as well would run each
+# PR commit twice.)
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
