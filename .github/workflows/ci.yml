@@ -47,3 +47,7 @@ jobs:
       - name: Build and test the dbt models
         working-directory: dbt
         run: dbt build --profiles-dir .
+
+      # Proves the Airflow image (with dbt inside) still builds from airflow/Dockerfile.
+      - name: Build the Airflow image
+        run: docker build -t hdb-airflow:ci airflow
