@@ -10,7 +10,7 @@ RUN apt-get update \
 
 # Same pinned dbt as the Airflow image and GitHub Actions, in its own virtualenv.
 RUN python3 -m venv /opt/ci-venv \
-    && /opt/ci-venv/bin/pip install --no-cache-dir "dbt-postgres==1.11.0" ruff
+    && /opt/ci-venv/bin/pip install --no-cache-dir "dbt-postgres==1.11.0" "ruff==0.17.1"
 
 # Docker CLI (+ buildx) only. Builds run on the host's Docker engine through the mounted socket.
 COPY --from=docker:29-cli /usr/local/bin/docker /usr/local/bin/docker
