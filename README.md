@@ -4,7 +4,7 @@
 
 An end-to-end batch data pipeline on Singapore public data. Airflow pulls HDB resale flat transactions from data.gov.sg every week and loads them into PostgreSQL, and dbt models them into a tested star schema with a monthly price mart on top. Everything runs in Docker, and every push builds and tests the models in GitHub Actions.
 
-**Stack:** Apache Airflow 3 · dbt Core · PostgreSQL 16 · Python · Docker Compose · GitHub Actions
+**Stack:** Apache Airflow 3 · dbt Core · PostgreSQL 16 · Python · Docker Compose · GitHub Actions · Jenkins
 **Data:** [Resale flat prices based on registration date, Jan 2017 onwards](https://data.gov.sg/datasets/d_8b84c4ee58e3cfc0ece0d773c8ca6abc/view) (data.gov.sg), about 220,000 transactions
 
 ## Highlights
@@ -13,7 +13,7 @@ An end-to-end batch data pipeline on Singapore public data. Airflow pulls HDB re
 - **One-off backfill.** The same DAG takes a `start_month` / `end_month` range to load all history since 2017.
 - **Star schema in dbt.** A fact table of sales, four dimensions and a monthly mart, so "4-room price per sqm in Tampines last year" is one simple query.
 - **31 data tests on every run.** Unique and not-null keys, accepted values, fact-to-dimension relationships and a custom price check. A bad row fails the run instead of reaching a dashboard.
-- **CI on every push.** GitHub Actions starts a Postgres container, loads a sample, and runs the full `dbt build` with tests.
+- **CI in GitHub Actions and Jenkins.** On every push, GitHub Actions starts a Postgres container, loads a sample, runs the full `dbt build` with tests, and builds the Airflow image. The same stages run in a self-hosted Jenkins, defined in a `Jenkinsfile`, with Jenkins itself set up as code.
 
 ## Findings
 
@@ -125,6 +125,20 @@ Tests run as part of every `dbt build`. A failing test stops the models that dep
 - **Hashed surrogate keys.** Dimension keys are `md5` of the natural key, so the fact and the dimensions compute matching keys independently, and keys stay stable across rebuilds.
 - **Median as the headline metric.** A few very expensive flats skew averages, so the mart reports median price per sqm. It also stores a sum next to each average, so months roll up into a true yearly average.
 
+## CI/CD
+
+Two pipelines run the same checks: lint the DAG, load a sample into a clean Postgres, build and test every dbt model, and build the Airflow Docker image.
+
+| | GitHub Actions | Jenkins |
+|---|---|---|
+| Defined in | `.github/workflows/ci.yml` | `Jenkinsfile` |
+| Runs on | GitHub's hosted runners, on every push | A self-hosted Jenkins server in Docker (`jenkins/`) |
+| Test database | A Postgres service container per run | A `ci-postgres` container, reset at the start of each run |
+
+The Jenkins server is configured as code: `jenkins/Dockerfile` bakes in the tools and plugins, and `jenkins/casc.yaml` (Configuration as Code) skips the setup wizard and creates the pipeline job. A fresh container is ready to run with no clicking.
+
+To run it: `docker compose -f jenkins/docker-compose.yml up -d --build`, open port **8081**, then **hdb-resale-pipeline → Build with Parameters → Build**.
+
 ## Run it yourself
 
 The easiest way is GitHub Codespaces, which has Docker ready to go.
@@ -148,6 +162,8 @@ After that, the weekly schedule keeps the latest two months up to date. An optio
 
 ```
 dags/hdb_resale_pipeline.py   Airflow DAG: extract, load, dbt build
+Jenkinsfile                   Jenkins CI pipeline (lint, dbt build + tests, image build)
+jenkins/                      Jenkins server as code: image, plugins, JCasC config, compose file
 dbt/models/staging/           Typed, cleaned view over the raw table
 dbt/models/marts/             Star schema (fact + 4 dimensions) and the monthly mart
 dbt/tests/                    Custom data tests
@@ -172,5 +188,7 @@ docker-compose.yml            Airflow, its metadata DB, and the warehouse
 | Airflow logs | `docker compose logs -f airflow` |
 | SQL shell on the warehouse | `docker compose exec warehouse psql -U hdb -d hdb` |
 | Run dbt from the terminal | `cd dbt && dbt build` |
+| Start Jenkins (port 8081) | `docker compose -f jenkins/docker-compose.yml up -d --build` |
+| Stop Jenkins | `docker compose -f jenkins/docker-compose.yml down` |
 
 Warehouse connection for a SQL client: `localhost:5433`, user `hdb`, password `hdb`, database `hdb`.
