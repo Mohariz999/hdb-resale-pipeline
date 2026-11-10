@@ -1,7 +1,10 @@
 name: CI
 
+# Pushes to main, plus every PR. (Running on every branch push as well would run each
+# PR commit twice.)
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -31,7 +34,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install tools
-        run: pip install "dbt-postgres==1.11.0" ruff
+        run: pip install "dbt-postgres==1.11.0" "ruff==0.17.1"
 
       - name: Lint DAG code
         run: ruff check dags
@@ -47,3 +50,7 @@ jobs:
       - name: Build and test the dbt models
         working-directory: dbt
         run: dbt build --profiles-dir .
+
+      # Proves the Airflow image (with dbt inside) still builds from airflow/Dockerfile.
+      - name: Build the Airflow image
+        run: docker build -t hdb-airflow:ci airflow

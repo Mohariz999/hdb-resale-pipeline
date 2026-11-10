@@ -8,7 +8,7 @@ import csv
 import logging
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import requests
 from airflow.providers.postgres.hooks.postgres import PostgresHook
@@ -114,7 +114,7 @@ def fetch_month(month: str, headers: dict, pause: float) -> list[dict]:
 
 @dag(
     schedule="@weekly",  # Sundays 00:00 UTC
-    start_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+    start_date=datetime(2024, 1, 1, tzinfo=UTC),
     catchup=False,
     is_paused_upon_creation=True,
     tags=["hdb"],

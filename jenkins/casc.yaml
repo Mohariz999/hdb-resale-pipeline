@@ -1,0 +1,33 @@
+# Jenkins configuration as code (JCasC): everything Jenkins needs, so nobody configures it by hand.
+jenkins:
+  systemMessage: "HDB resale pipeline CI. Local dev only: no login."
+  numExecutors: 2
+  # Local dev only, like the Airflow UI. A real Jenkins would have users and permissions.
+  authorizationStrategy: unsecured
+
+unclassified:
+  location:
+    url: "http://localhost:8081/"
+
+# One pipeline job. It checks out the repo from GitHub and runs the Jenkinsfile at its root.
+# ^${BRANCH} is escaped so JCasC leaves it for Jenkins to fill in at build time.
+jobs:
+  - script: >
+      pipelineJob('hdb-resale-pipeline') {
+        description('Lint, test and build the HDB resale pipeline')
+        parameters {
+          stringParam('BRANCH', 'main', 'Git branch to build')
+        }
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote { url('https://github.com/Mohariz999/hdb-resale-pipeline.git') }
+                branch('^${BRANCH}')
+              }
+            }
+            scriptPath('Jenkinsfile')
+            lightweight(false)
+          }
+        }
+      }

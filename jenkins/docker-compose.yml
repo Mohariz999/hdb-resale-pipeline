@@ -1,0 +1,36 @@
+# Local Jenkins CI: the Jenkins server plus a Postgres it uses as a throwaway test database.
+#
+# Start:  docker compose -f jenkins/docker-compose.yml up -d --build
+# Open:   port 8081 (Ports tab in Codespaces). No login.
+# Stop:   docker compose -f jenkins/docker-compose.yml down
+
+name: hdb-ci
+
+services:
+  jenkins:
+    build: .
+    # Local dev only: root lets the pipeline use the host's Docker engine through the socket.
+    user: root
+    ports:
+      - "8081:8080"
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      ci-postgres:
+        condition: service_healthy
+
+  # Test database for the pipeline. The Jenkinsfile wipes it at the start of every run.
+  ci-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hdb
+      POSTGRES_PASSWORD: hdb
+      POSTGRES_DB: hdb
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "hdb"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  jenkins-home:

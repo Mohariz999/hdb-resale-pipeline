@@ -8,9 +8,10 @@
     "cpus": 2,
     "memory": "8gb"
   },
-  "forwardPorts": [8080, 5433],
+  "forwardPorts": [8080, 8081, 5433],
   "portsAttributes": {
     "8080": { "label": "Airflow UI", "onAutoForward": "openBrowser" },
+    "8081": { "label": "Jenkins" },
     "5433": { "label": "Warehouse (Postgres)" }
   },
   "postCreateCommand": "bash .devcontainer/post-create.sh",
